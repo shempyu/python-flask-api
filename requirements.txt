@@ -1,6 +1,9 @@
-setuptools>=65.5.0
-wheel>=0.38.0
+# --- Core build tools (must come first) ---
+pip>=25.1.1
+setuptools>=70.0.0
+wheel>=0.43.0
 
+# --- App dependencies ---
 flask==2.3.3
 flask-cors==4.0.0
 pandas==2.0.3
