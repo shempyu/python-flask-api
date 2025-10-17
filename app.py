@@ -3,22 +3,15 @@ from flask_cors import CORS
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+import logging
 import os
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Load your trained model and scaler
-try:
-    model = joblib.load('model.pkl')
-    scaler = joblib.load('scaler.pkl')
-    print("✅ Model and scaler loaded successfully!")
-except:
-    print("❌ Model files not found. Training new model...")
-    model = None
-    scaler = None
+app = Flask(__name__)
+CORS(app)
 
 # Crop dictionary
 crop_dict = {
@@ -28,6 +21,32 @@ crop_dict = {
     16: "Blackgram", 17: "Mungbean", 18: "Mothbeans", 19: "Pigeonpeas",
     20: "Kidneybeans", 21: "Chickpea", 22: "Coffee"
 }
+
+MODEL_FILE = "model.pkl"
+SCALER_FILE = "scaler.pkl"
+
+# Function to train and save model
+def train_and_save_model():
+    from deploy import create_crop_model  # or copy the function code here
+    success = create_crop_model()
+    if success:
+        logger.info("✅ Model trained and saved successfully.")
+    else:
+        logger.error("❌ Failed to create model.")
+        raise RuntimeError("Model training failed.")
+
+    global model, scaler
+    model = joblib.load(MODEL_FILE)
+    scaler = joblib.load(SCALER_FILE)
+
+# Try loading model and scaler, train if missing
+try:
+    model = joblib.load(MODEL_FILE)
+    scaler = joblib.load(SCALER_FILE)
+    logger.info("✅ Model and scaler loaded successfully.")
+except Exception as e:
+    logger.warning(f"⚠️ Model files not found or failed to load: {e}")
+    train_and_save_model()
 
 @app.route('/')
 def home():
@@ -46,52 +65,31 @@ def health():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        # Get data from request
         data = request.get_json()
-        
-        # Extract features
-        features = [
-            data['N'],
-            data['P'], 
-            data['K'],
-            data['temperature'],
-            data['humidity'],
-            data['ph'],
-            data['rainfall']
-        ]
-        
-        # Convert to numpy array
+        required_fields = ['N', 'P', 'K', 'temperature', 'humidity', 'ph', 'rainfall']
+        if not all(field in data for field in required_fields):
+            missing = [field for field in required_fields if field not in data]
+            return jsonify({"success": False, "error": f"Missing fields: {missing}"}), 400
+
+        features = [data[field] for field in required_fields]
         features_array = np.array([features])
-        
-        # Scale features
         features_scaled = scaler.transform(features_array)
-        
-        # Make prediction
         prediction = model.predict(features_scaled)
-        crop_code = prediction[0]
-        
-        # Get crop name
+        crop_code = int(prediction[0])
         crop_name = crop_dict.get(crop_code, "Unknown Crop")
-        
+
         return jsonify({
             "success": True,
             "recommended_crop": crop_name,
-            "crop_code": int(crop_code),
+            "crop_code": crop_code,
             "input_parameters": data
         })
-        
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 400
+        logger.error(f"Prediction error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 400
 
 if __name__ == '__main__':
-    # Train model if not loaded
-    if model is None:
-        train_and_save_model()
-    
     port = int(os.environ.get('PORT', 10000))
+    logger.info(f"🚀 Starting Flask server on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
-
-    
